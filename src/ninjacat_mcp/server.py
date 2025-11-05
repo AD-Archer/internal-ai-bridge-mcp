@@ -317,6 +317,21 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         }
         return JSONResponse(schema)
 
+    async def openai_models(request: Request) -> Response:
+        """Return list of available models in OpenAI format."""
+        models = {
+            "object": "list",
+            "data": [
+                {
+                    "id": "ninjacat",
+                    "object": "model",
+                    "created": 1640995200,
+                    "owned_by": "ninjacat"
+                }
+            ]
+        }
+        return JSONResponse(models)
+
     async def openai_chat(request: Request) -> Response:
         if not client:
             return JSONResponse({"error": "Client not configured"}, status_code=500)
@@ -414,6 +429,7 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         Route("/mcp/openapi.json", openapi),
         Route("/v1/chat/completions", openai_chat, methods=["POST"]),
         Route("/v1/chat/completions/openapi.json", openai_openapi),
+        Route("/v1/models", openai_models),
         Route("/mcp/openai/v1/chat/completions", openai_chat, methods=["POST"]),
         WebSocketRoute("/mcp/openai", mcp_ws),
     ]

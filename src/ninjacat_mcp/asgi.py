@@ -21,6 +21,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from .config import load_settings, SettingsError
 from .server import build_server, _build_websocket_app
+from .ai_client import AIWebhookClient
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,12 @@ def create_app(env_file: Optional[str] = None) -> Starlette:
         return _make_fallback_app(exc)
 
     server = build_server(settings)
-    return _build_websocket_app(server)
+    client = AIWebhookClient(
+        str(settings.ai_webhook_url),
+        api_key=settings.ai_api_key,
+        timeout=settings.ai_timeout,
+    )
+    return _build_websocket_app(server, settings, client)
 
 
 # Allow callers to override via ENV_FILE if they want to load a dotenv file

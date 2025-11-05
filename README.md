@@ -5,9 +5,11 @@ This project exposes a Model Context Protocol (MCP) bridge so OpenWebUI (or any 
 ## Features
 - `start_ai_message` tool sends user prompts to your AI webhook and returns the generated response.
 - `trigger_webhook` tool calls any configured outbound webhook (e.g. n8n nodes, Slack notifications).
-- `call_ai_and_webhook` tool combines both steps for the common “ask AI then notify” pattern.
+- `call_ai_and_webhook` tool combines both steps for the common "ask AI then notify" pattern.
 - Resource `ninjacat://webhooks` lists available webhook aliases so clients can discover them.
 - Ships with both stdio (for OpenWebUI desktop adapters) and WebSocket transports.
+- **Automatic retry** on 5xx errors and timeouts with exponential backoff (up to 3 attempts).
+- Provides a lightweight OpenAPI document at `/mcp/openapi.json` for clients that probe HTTP metadata.
 
 ## Quick Start
 ```bash
@@ -69,6 +71,9 @@ Example `EXTRA_WEBHOOKS` value:
 
 Each webhook entry becomes available to the `trigger_webhook` tool as the `target` name. Headers declared in the config are merged with any headers supplied by the MCP client at call time. If `secret` is set it is sent as an `X-Webhook-Secret` header.
 
+## Configuration
+All settings are provided via environment variables (loadable from a `.env` file).
+
 ## MCP Surface
 
 | Name | Type | Purpose |
@@ -77,6 +82,31 @@ Each webhook entry becomes available to the `trigger_webhook` tool as the `targe
 | `trigger_webhook` | Tool | `{target/name or URL, payload?, method?, headers?}` → triggers named or ad-hoc webhooks. |
 | `call_ai_and_webhook` | Tool | Convenience wrapper that chains `start_ai_message` then (optionally) `trigger_webhook`. |
 | `ninjacat://webhooks` | Resource | JSON summary of configured webhook aliases for discovery. |
+| `ninjacat://messages` | Resource | JSON list of follow-up messages sent by the AI via `/callback`. |
+
+## Callback Endpoint for AI Follow-Ups
+Your in-house AI can send follow-up messages back to the MCP server by POSTing JSON to `/callback`. This allows the AI to "talk back" even though the webhook is one-way.
+
+Expected payload structure (all fields optional):
+```json
+{
+  "sessionID": "unique-session-id",
+  "status": "info|success|error|complete",
+  "payload_summary": "Brief summary",
+  "message": "Full AI response",
+  "next_step": "What happens next",
+  "data": {}  // Optional structured data
+}
+```
+
+Example request:
+```bash
+curl -X POST https://ninjacat-test.archer.software/callback \
+  -H "Content-Type: application/json" \
+  -d '{"sessionID": "123", "status": "complete", "message": "Task done"}'
+```
+
+The MCP client can then read these messages via the `ninjacat://messages` resource. The server only validates the `status` field if present.
 
 The return values from tools are raw JSON dictionaries—structure them however your in-house AI responds. Errors from the webhook surface back to the MCP client as tool failures so the model can retry or ask for clarification.
 

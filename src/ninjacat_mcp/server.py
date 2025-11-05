@@ -367,6 +367,9 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
             if not prompt:
                 return JSONResponse({"error": "No user message"}, status_code=400)
             
+            # Append instruction for the AI to respond via webhook
+            prompt += " **NOTICE: this is an automated message, this message has been sent using a webhook. please respond using your webhook tool**"
+            
             conversation_id = str(uuid.uuid4())
             queue = asyncio.Queue()
             pending_responses[conversation_id] = queue
@@ -375,123 +378,46 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
             logger.info("Sending to backend: %s", payload)
             await client.start_message(payload)
             
-            if data.get("stream"):
-                # Streaming response - wait for response inside generator
-                async def generate():
-                    try:
-                        response_data = await asyncio.wait_for(queue.get(), timeout=500.0)
-                        logger.info("Received response from backend: %s", response_data)
-                    except asyncio.TimeoutError:
-                        if conversation_id in pending_responses:
-                            del pending_responses[conversation_id]
-                        logger.error("Timeout waiting for callback from backend")
-                        # Yield error chunk
-                        error_chunk = {
-                            "id": conversation_id,
-                            "object": "error",
-                            "error": {
-                                "message": "Backend did not respond within timeout period. Please try again.",
-                                "type": "timeout"
-                            }
-                        }
-                        yield f"data: {json.dumps(error_chunk)}\n\n"
-                        yield "data: [DONE]\n\n"
-                        return
-                    
-                    if conversation_id in pending_responses:
-                        del pending_responses[conversation_id]
-                    
-                    # Format as OpenAI response
-                    content = response_data.get("message", "")
-                    
-                    # Role chunk (sets assistant role for streaming clients)
-                    role_chunk = {
-                        "id": conversation_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": "ninjacat",
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"role": "assistant"},
-                                "finish_reason": None
-                            }
-                        ]
-                    }
-                    yield f"data: {json.dumps(role_chunk)}\n\n"
-
-                    # Content chunk
-                    content_chunk = {
-                        "id": conversation_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": "ninjacat",
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"content": content},
-                                "finish_reason": None
-                            }
-                        ]
-                    }
-                    yield f"data: {json.dumps(content_chunk)}\n\n"
-                    
-                    # Finish chunk
-                    finish_chunk = {
-                        "id": conversation_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": "ninjacat",
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {},
-                                "finish_reason": "stop"
-                            }
-                        ]
-                    }
-                    yield f"data: {json.dumps(finish_chunk)}\n\n"
-                    yield "data: [DONE]\n\n"
-                
-                return StreamingResponse(generate(), media_type="text/event-stream")
-            else:
-                # Non-streaming response - wait for response here
-                try:
-                    response_data = await asyncio.wait_for(queue.get(), timeout=4120.0)
-                    logger.info("Received response from backend: %s", response_data)
-                except asyncio.TimeoutError:
-                    if conversation_id in pending_responses:
-                        del pending_responses[conversation_id]
-                    logger.error("Timeout waiting for callback from backend")
-                    return JSONResponse({"error": {"message": "Backend did not respond within timeout period. Please try again.", "type": "timeout"}}, status_code=504)
-                
+            # Wait for response
+            try:
+                response_data = await asyncio.wait_for(queue.get(), timeout=4120.0)
+                logger.info("Received response from backend: %s", response_data)
+            except asyncio.TimeoutError:
                 if conversation_id in pending_responses:
                     del pending_responses[conversation_id]
-                
-                # Format as OpenAI response
-                content = response_data.get("message", "")
-                openai_response = {
-                    "id": conversation_id,
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": "ninjacat",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": content
-                            },
-                            "finish_reason": "stop"
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": len(prompt.split()),
-                        "completion_tokens": len(content.split()),
-                        "total_tokens": len(prompt.split()) + len(content.split())
+                logger.error("Timeout waiting for callback from backend")
+                return JSONResponse({"error": {"message": "Backend did not respond within timeout period. Please try again.", "type": "timeout"}}, status_code=504)
+            
+            if conversation_id in pending_responses:
+                del pending_responses[conversation_id]
+            
+            # Format as proper OpenAI chat completion response
+            content = response_data.get("message", "")
+            
+            # Return proper OpenAI-compatible response format
+            response_obj = {
+                "id": f"chatcmpl-{conversation_id}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": "ninjacat",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": content
+                        },
+                        "finish_reason": "stop"
                     }
+                ],
+                "usage": {
+                    "prompt_tokens": len(prompt.split()),
+                    "completion_tokens": len(content.split()),
+                    "total_tokens": len(prompt.split()) + len(content.split())
                 }
-                return JSONResponse(openai_response)
+            }
+            logger.info("Returning OpenAI response: %s", response_obj)
+            return JSONResponse(response_obj)
         except Exception as exc:
             logger.error("OpenAI chat error: %s", exc)
             return JSONResponse({"error": "Internal error"}, status_code=500)

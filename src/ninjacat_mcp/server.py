@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 callback_messages = []
 
 # Pending responses for OpenAI compatible endpoint
-pending_responses: dict[str, asyncio.Future] = {}
+pending_responses: dict[str, asyncio.Queue] = {}
 
 
 def build_server(settings: Settings, client: AIWebhookClient | None = None) -> FastMCP:
@@ -182,16 +182,32 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
             
             callback_messages.append(data)
             
-            # Set pending response if sessionID matches
+            # Put into pending response queue if sessionID matches
             if "sessionID" in data and data["sessionID"] in pending_responses:
-                pending_responses[data["sessionID"]].set_result(data)
+                await pending_responses[data["sessionID"]].put(data)
             
             # Send to frontend webhook if configured
             if settings.frontend_webhook_url:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient() as http_client:
                     try:
-                        await client.post(str(settings.frontend_webhook_url), json=data, timeout=10.0)
-                        logger.info("Sent callback to frontend: %s", settings.frontend_webhook_url)
+                        response = await http_client.post(
+                            str(settings.frontend_webhook_url),
+                            json=data,
+                            timeout=200.0,
+                        )
+                        if response.status_code >= 400:
+                            logger.error(
+                                "Frontend webhook %s returned %s: %s",
+                                settings.frontend_webhook_url,
+                                response.status_code,
+                                response.text,
+                            )
+                        else:
+                            logger.info(
+                                "Sent callback to frontend %s (status %s)",
+                                settings.frontend_webhook_url,
+                                response.status_code,
+                            )
                     except Exception as exc:
                         logger.error("Failed to send callback to frontend: %s", exc)
             
@@ -352,32 +368,60 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
                 return JSONResponse({"error": "No user message"}, status_code=400)
             
             conversation_id = str(uuid.uuid4())
-            future = asyncio.Future()
-            pending_responses[conversation_id] = future
+            queue = asyncio.Queue()
+            pending_responses[conversation_id] = queue
             
             payload = {"prompt": prompt, "sessionID": conversation_id}
             logger.info("Sending to backend: %s", payload)
             await client.start_message(payload)
             
-            # Wait for response with timeout
-            try:
-                response_data = await asyncio.wait_for(future, timeout=60.0)
-                logger.info("Received response from backend: %s", response_data)
-            except asyncio.TimeoutError:
-                if conversation_id in pending_responses:
-                    del pending_responses[conversation_id]
-                return JSONResponse({"error": "Timeout waiting for response"}, status_code=504)
-            
-            if conversation_id in pending_responses:
-                del pending_responses[conversation_id]
-            
-            # Format as OpenAI response
-            content = response_data.get("message", "")
-            
             if data.get("stream"):
-                # Streaming response - send as single chunk for simplicity
+                # Streaming response - wait for response inside generator
                 async def generate():
-                    chunk = {
+                    try:
+                        response_data = await asyncio.wait_for(queue.get(), timeout=500.0)
+                        logger.info("Received response from backend: %s", response_data)
+                    except asyncio.TimeoutError:
+                        if conversation_id in pending_responses:
+                            del pending_responses[conversation_id]
+                        logger.error("Timeout waiting for callback from backend")
+                        # Yield error chunk
+                        error_chunk = {
+                            "id": conversation_id,
+                            "object": "error",
+                            "error": {
+                                "message": "Backend did not respond within timeout period. Please try again.",
+                                "type": "timeout"
+                            }
+                        }
+                        yield f"data: {json.dumps(error_chunk)}\n\n"
+                        yield "data: [DONE]\n\n"
+                        return
+                    
+                    if conversation_id in pending_responses:
+                        del pending_responses[conversation_id]
+                    
+                    # Format as OpenAI response
+                    content = response_data.get("message", "")
+                    
+                    # Role chunk (sets assistant role for streaming clients)
+                    role_chunk = {
+                        "id": conversation_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": "ninjacat",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"role": "assistant"},
+                                "finish_reason": None
+                            }
+                        ]
+                    }
+                    yield f"data: {json.dumps(role_chunk)}\n\n"
+
+                    # Content chunk
+                    content_chunk = {
                         "id": conversation_id,
                         "object": "chat.completion.chunk",
                         "created": int(time.time()),
@@ -386,16 +430,46 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
                             {
                                 "index": 0,
                                 "delta": {"content": content},
+                                "finish_reason": None
+                            }
+                        ]
+                    }
+                    yield f"data: {json.dumps(content_chunk)}\n\n"
+                    
+                    # Finish chunk
+                    finish_chunk = {
+                        "id": conversation_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": "ninjacat",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {},
                                 "finish_reason": "stop"
                             }
                         ]
                     }
-                    yield f"data: {json.dumps(chunk)}\n\n"
+                    yield f"data: {json.dumps(finish_chunk)}\n\n"
                     yield "data: [DONE]\n\n"
                 
-                return StreamingResponse(generate(), media_type="text/plain")
+                return StreamingResponse(generate(), media_type="text/event-stream")
             else:
-                # Non-streaming response
+                # Non-streaming response - wait for response here
+                try:
+                    response_data = await asyncio.wait_for(queue.get(), timeout=4120.0)
+                    logger.info("Received response from backend: %s", response_data)
+                except asyncio.TimeoutError:
+                    if conversation_id in pending_responses:
+                        del pending_responses[conversation_id]
+                    logger.error("Timeout waiting for callback from backend")
+                    return JSONResponse({"error": {"message": "Backend did not respond within timeout period. Please try again.", "type": "timeout"}}, status_code=504)
+                
+                if conversation_id in pending_responses:
+                    del pending_responses[conversation_id]
+                
+                # Format as OpenAI response
+                content = response_data.get("message", "")
                 openai_response = {
                     "id": conversation_id,
                     "object": "chat.completion",

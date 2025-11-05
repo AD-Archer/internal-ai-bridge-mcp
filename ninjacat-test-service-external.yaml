@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ninjacat-test-service
+spec:
+  ports:
+    - protocol: TCP
+      port: 8765
+      targetPort: 8765 # This should be the port your copyparty application is listening on
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: ninjacat-test-service # Must match the service name
+subsets:
+  - addresses:
+      - ip: 192.168.4.242 # Actual IP address of your copyparty application
+    ports:
+      - port: 8765 # Must match the targetPort of the service

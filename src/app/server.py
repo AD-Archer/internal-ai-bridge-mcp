@@ -25,6 +25,7 @@ from .ai_client import AIWebhookClient, AIWebhookError
 from .config import Settings
 from .storage import ConversationStore, format_history_for_prompt
 from .memory_api import build_memory_routes, register_memory_mcp_surface, build_memory_server, MemoryService
+from .auth import BearerAuthMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,41 @@ callback_messages = []
 
 # Pending responses for OpenAI compatible endpoint
 pending_responses: dict[str, asyncio.Queue] = {}
+
+
+def _build_auth_middleware(settings: Settings, *, exempt_paths: set[str] | None = None) -> Middleware | None:
+    if not settings.bearer_auth_enabled:
+        return None
+
+    tokens = {path: token for path, token in settings.route_bearer_tokens.items() if token}
+    default_token = settings.default_bearer_token or None
+    if not default_token and not tokens:
+        logger.warning("Bearer auth is enabled but no tokens were configured; skipping middleware.")
+        return None
+
+    return Middleware(
+        BearerAuthMiddleware,
+        enabled=settings.bearer_auth_enabled,
+        default_token=default_token,
+        route_tokens=tokens,
+        exempt_paths=sorted(exempt_paths or set()),
+    )
+
+
+def _build_middleware(settings: Settings, *, exempt_paths: set[str] | None = None) -> list[Middleware]:
+    middleware: list[Middleware] = []
+    auth_middleware = _build_auth_middleware(settings, exempt_paths=exempt_paths)
+    if auth_middleware:
+        middleware.append(auth_middleware)
+    middleware.append(
+        Middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    )
+    return middleware
 
 
 def _build_response_handler(settings: Settings) -> Callable[[dict[str, Any]], Awaitable[None]]:
@@ -760,14 +796,7 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         WebSocketRoute("/mcp/openai", mcp_ws),
         WebSocketRoute("/mcp/hook", mcp_memory_ws),
     ] + memory_routes
-    middleware = [
-        Middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-    ]
+    middleware = _build_middleware(settings, exempt_paths={"/healthz"})
 
     return Starlette(routes=routes, middleware=middleware)
 
@@ -973,14 +1002,7 @@ def _build_memory_websocket_app(settings: Settings) -> Starlette:
         Route("/mcp/hook", mcp_memory_http, methods=["POST"]),
         WebSocketRoute("/mcp/hook", mcp_memory_ws),
     ] + memory_routes
-    middleware = [
-        Middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-    ]
+    middleware = _build_middleware(settings, exempt_paths={"/healthz"})
     return Starlette(routes=routes, middleware=middleware)
 
 

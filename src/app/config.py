@@ -24,6 +24,12 @@ class WebhookTarget(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
 
 
+def _parse_bool(value: str | None, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Settings(BaseModel):
     """Application configuration loaded from environment variables or a dotenv file."""
 
@@ -36,6 +42,9 @@ class Settings(BaseModel):
     conversation_db_path: Path = Field(default=Path("conversation_history.db"))
     conversation_history_limit: int = Field(default=20, gt=0, le=200)
     message_retention_days: int = Field(default=14, ge=1)
+    bearer_auth_enabled: bool = Field(default=False)
+    default_bearer_token: str | None = None
+    route_bearer_tokens: dict[str, str] = Field(default_factory=dict)
 
     @classmethod
     def _parse_extra_webhooks(cls, raw: str | None) -> dict[str, WebhookTarget]:
@@ -58,6 +67,27 @@ class Settings(BaseModel):
                 raise SettingsError(f"Invalid webhook config for '{name}'.") from exc
         return parsed
 
+    @staticmethod
+    def _parse_route_tokens(raw: str | None) -> dict[str, str]:
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SettingsError("ROUTE_BEARER_TOKENS must be valid JSON.") from exc
+
+        if not isinstance(data, dict):
+            raise SettingsError("ROUTE_BEARER_TOKENS must decode to a JSON object.")
+
+        tokens: dict[str, str] = {}
+        for path, token in data.items():
+            if not isinstance(path, str) or not isinstance(token, str):
+                raise SettingsError("ROUTE_BEARER_TOKENS must map string paths to string tokens.")
+            if not token.strip():
+                raise SettingsError(f"Bearer token for '{path}' cannot be blank.")
+            tokens[path] = token
+        return tokens
+
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
         """Create settings from an environment mapping."""
@@ -74,6 +104,7 @@ class Settings(BaseModel):
             raise SettingsError("AI_TIMEOUT must be numeric.") from exc
 
         extra_webhooks = cls._parse_extra_webhooks(values.get("EXTRA_WEBHOOKS"))
+        route_tokens = cls._parse_route_tokens(values.get("ROUTE_BEARER_TOKENS"))
 
         db_path_raw = values.get("CONVERSATION_DB_PATH", "conversation_history.db")
         db_path = Path(db_path_raw)
@@ -105,6 +136,9 @@ class Settings(BaseModel):
                 conversation_db_path=db_path,
                 conversation_history_limit=history_limit,
                 message_retention_days=retention_days,
+                bearer_auth_enabled=_parse_bool(values.get("ENABLE_BEARER_AUTH")),
+                default_bearer_token=values.get("API_BEARER_TOKEN"),
+                route_bearer_tokens=route_tokens,
             )
         except ValidationError as exc:
             raise SettingsError("Invalid configuration values.") from exc

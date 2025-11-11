@@ -54,6 +54,9 @@ All settings are provided via environment variables (loadable from a `.env` file
 | `AI_TIMEOUT` | optional | Request timeout in seconds (defaults to 30). |
 | `CONVERSATION_DB_PATH` | optional | Filesystem path to the SQLite DB that stores session transcripts (`./conversation_history.db` by default). |
 | `CONVERSATION_HISTORY_LIMIT` | optional | Max number of prior messages to feed back into each AI prompt (defaults to 20). |
+| `ENABLE_BEARER_AUTH` | optional | When `true`, every route except `/healthz` requires a valid `Authorization: Bearer ...` header (defaults to `false`). |
+| `API_BEARER_TOKEN` | optional | Shared Bearer token used for any protected route that does not have an explicit override. |
+| `ROUTE_BEARER_TOKENS` | optional | JSON object that maps specific path prefixes (e.g. `/v1`, `/mcp/hook`) to dedicated Bearer tokens. |
 | `EXTRA_WEBHOOKS` | optional | JSON object describing named webhook targets. |
 
 Example `EXTRA_WEBHOOKS` value:
@@ -74,6 +77,17 @@ Example `EXTRA_WEBHOOKS` value:
 ```
 
 Each webhook entry becomes available to the `trigger_webhook` tool as the `target` name. Headers declared in the config are merged with any headers supplied by the MCP client at call time. If `secret` is set it is sent as an `X-Webhook-Secret` header.
+
+When bearer auth is enabled you can either rely on a single `API_BEARER_TOKEN` for every route, or override select prefixes via `ROUTE_BEARER_TOKENS`. For example:
+
+```json
+{
+  "/mcp/hook": "memory-hook-token",
+  "/v1": "openai-endpoints-token"
+}
+```
+
+The overrides apply to both HTTP and WebSocket routes whose path matches or extends the provided prefix.
 
 ## Configuration
 All settings are provided via environment variables (loadable from a `.env` file).

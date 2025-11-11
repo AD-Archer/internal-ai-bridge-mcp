@@ -7,7 +7,7 @@ import json
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Any, Awaitable, Callable
 import asyncio
 
 import uvicorn
@@ -35,6 +35,55 @@ callback_messages = []
 pending_responses: dict[str, asyncio.Queue] = {}
 
 
+def _build_response_handler(settings: Settings) -> Callable[[dict[str, Any]], Awaitable[None]]:
+    """Create a coroutine that fans out recorded responses to listeners."""
+
+    async def handle(record: dict[str, Any]) -> None:
+        payload = dict(record.get("payload") or {})
+        session_id = record.get("session_id")
+        logger.info("🎯 Response handler called with: session_id=%s, payload=%s", session_id, payload)
+
+        callback_messages.append(payload)
+        logger.info("📝 Added to callback_messages, total count: %d", len(callback_messages))
+
+        if session_id and session_id in pending_responses:
+            logger.info("📋 Putting response in pending queue for session %s", session_id)
+            await pending_responses[session_id].put(payload)
+        elif session_id:
+            logger.warning("⚠️ Session %s not found in pending_responses. Keys: %s", session_id, list(pending_responses.keys()))
+        else:
+            logger.warning("⚠️ No session_id in record")
+
+        if settings.frontend_webhook_url:
+            logger.info("🔗 Sending to frontend webhook: %s", settings.frontend_webhook_url)
+            async with httpx.AsyncClient() as http_client:
+                try:
+                    response = await http_client.post(
+                        str(settings.frontend_webhook_url),
+                        json=payload,
+                        timeout=200.0,
+                    )
+                    if response.status_code >= 400:
+                        logger.error(
+                            "❌ Frontend webhook %s returned %s: %s",
+                            settings.frontend_webhook_url,
+                            response.status_code,
+                            response.text,
+                        )
+                    else:
+                        logger.info(
+                            "✅ Sent callback to frontend %s (status %s)",
+                            settings.frontend_webhook_url,
+                            response.status_code,
+                        )
+                except Exception as exc:
+                    logger.error("❌ Failed to send callback to frontend: %s", exc)
+        else:
+            logger.info("ℹ️ No frontend_webhook_url configured")
+
+    return handle
+
+
 def build_server(settings: Settings, client: AIWebhookClient | None = None) -> FastMCP:
     """Construct an MCP server instance."""
     ai_client = client or AIWebhookClient(
@@ -48,7 +97,9 @@ def build_server(settings: Settings, client: AIWebhookClient | None = None) -> F
         "Use the `start_ai_message` tool to send prompts to the in-house AI webhook. "
         "Use `trigger_webhook` to reach any additional named webhooks defined in configuration "
         "or by specifying an explicit URL. "
-        "Check `external-ai://messages` for any follow-up messages sent by the AI via callback."
+        "When you receive a response from the AI, ALWAYS call the `send_user_response` MCP tool to send it back. "
+        "This records the response in conversation memory AND sends it back to the client. "
+        "Check `external-ai://messages` for follow-up messages recorded via the memory MCP surface."
     )
 
     mcp = FastMCP(
@@ -58,9 +109,10 @@ def build_server(settings: Settings, client: AIWebhookClient | None = None) -> F
     )
 
     # Also expose conversation memory tools/resources via the same MCP server
+    response_handler = _build_response_handler(settings)
     try:
         store = ConversationStore(settings.conversation_db_path)
-        register_memory_mcp_surface(mcp, store, settings)
+        register_memory_mcp_surface(mcp, store, settings, response_handler=response_handler)
     except Exception as exc:
         # Defensive: memory surface should never prevent core server from running
         logger.warning("Failed to register memory MCP surface: %s", exc)
@@ -160,7 +212,7 @@ def build_server(settings: Settings, client: AIWebhookClient | None = None) -> F
 
     @mcp.resource("external-ai://messages")
     def list_callback_messages() -> str:
-        """Return any follow-up messages sent by the AI via the /callback endpoint."""
+        """Return any follow-up messages captured via the response-recording MCP tool."""
         return json.dumps(callback_messages, indent=2)
 
     return mcp
@@ -174,6 +226,7 @@ async def run_stdio(settings: Settings) -> None:
 
 def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookClient | None = None) -> Starlette:
     store = ConversationStore(settings.conversation_db_path)
+    response_handler = _build_response_handler(settings)
     
     # Clean up old messages on startup
     try:
@@ -183,7 +236,8 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
     except Exception as exc:
         logger.warning("Failed to clean up old messages: %s", exc)
     
-    memory_server = build_memory_server(store, settings)
+    memory_server = build_memory_server(store, settings, response_handler=response_handler)
+    memory_service = MemoryService(store, settings)
 
     async def health(_: Request) -> Response:
         return JSONResponse({"status": "ok"})
@@ -195,64 +249,31 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         """Endpoint for AI to send follow-up messages."""
         try:
             data = await request.json()
-            if not isinstance(data, dict):
-                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-            
-            # Optional validation for status if present
-            if "status" in data and data["status"] not in ["info", "success", "error", "complete"]:
-                return JSONResponse({"error": "Invalid status"}, status_code=400)
-            
-            callback_messages.append(data)
-            session_id = data.get("sessionID") or data.get("session_id")
-            assistant_message = data.get("message") or data.get("payload_summary")
-            if session_id and (assistant_message or data):
-                try:
-                    store.record_message(
-                        session_id,
-                        "assistant",
-                        assistant_message or json.dumps(data),
-                        metadata=data,
-                    )
-                except Exception as exc:
-                    logger.error("Failed to store assistant message: %s", exc)
-            
-            # Put into pending response queue if sessionID matches
-            if "sessionID" in data and data["sessionID"] in pending_responses:
-                await pending_responses[data["sessionID"]].put(data)
-            
-            # Send to frontend webhook if configured
-            if settings.frontend_webhook_url:
-                async with httpx.AsyncClient() as http_client:
-                    try:
-                        response = await http_client.post(
-                            str(settings.frontend_webhook_url),
-                            json=data,
-                            timeout=200.0,
-                        )
-                        if response.status_code >= 400:
-                            logger.error(
-                                "Frontend webhook %s returned %s: %s",
-                                settings.frontend_webhook_url,
-                                response.status_code,
-                                response.text,
-                            )
-                        else:
-                            logger.info(
-                                "Sent callback to frontend %s (status %s)",
-                                settings.frontend_webhook_url,
-                                response.status_code,
-                            )
-                    except Exception as exc:
-                        logger.error("Failed to send callback to frontend: %s", exc)
-            
-            logger.info("Received callback message: %s", data)
-            return JSONResponse({"status": "received"})
         except Exception as exc:
-            logger.error("Callback error: %s", exc)
+            logger.error("Callback failed to parse JSON: %s", exc)
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+        if not isinstance(data, dict):
+            logger.error("Callback received non-dict data: %s", type(data))
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+        logger.info("🔄 Callback received from AI: %s", data)
+        try:
+            record = memory_service.record_ai_response(payload=data)
+            logger.info("✅ Recorded AI response: %s", record)
+        except ValueError as exc:
+            logger.error("❌ Callback validation error: %s", exc)
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            logger.error("❌ Callback error while storing message: %s", exc)
             return JSONResponse({"error": "Failed to process callback"}, status_code=500)
 
+        logger.info("📤 Dispatching response via handler")
+        await response_handler(record)
+        logger.info("✅ Callback message received and dispatched: %s", data)
+        return JSONResponse({"status": "received", "session_id": record["session_id"]})
+
     async def mcp_memory_ws(websocket: WebSocket) -> None:
-        memory_server = build_memory_server(store, settings)
         async with websocket_server(websocket.scope, websocket.receive, websocket.send) as streams:
             await memory_server._mcp_server.run(  # noqa: SLF001 - accessing private attr for transport wiring
                 streams[0],
@@ -422,9 +443,10 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
             if history:
                 history_text = format_history_for_prompt(history)
             notice = (
-                f" **NOTICE: this is an automated message, this message has been sent using a "
-                f"webhook. please respond using your webhook tool. "
-                f"You have access to memory MCP tools: list_conversations, get_conversation, recall_conversation_context. "
+                f" **NOTICE: this is an automated message sent via webhook. "
+                f"When you have a response, you MUST call the `send_user_response` MCP tool with your response. "
+                f"This is the ONLY way to send your response back to the user and OpenWebUI. "
+                f"Available memory MCP tools: list_conversations, get_conversation, recall_conversation_context, send_user_response. "
                 f"Current conversation_id/session_id: {session_id}**"
             )
             final_prompt = prompt
@@ -589,6 +611,21 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
                             },
                             "required": ["session_id"]
                         }
+                    },
+                    {
+                        "name": "send_user_response",
+                        "description": "Send the AI response back to the user and OpenWebUI. MUST be called with your response message after receiving a prompt. This records the response in conversation memory and sends it to the client.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session_id": {"type": ["string", "null"], "description": "Session ID to record response in"},
+                                "message": {"type": ["string", "null"], "description": "The response message content from the AI"},
+                                "payload": {"type": ["object", "null"], "description": "Additional payload data"},
+                                "role": {"type": ["string", "null"], "description": "Role of the message sender (defaults to 'user')"},
+                                "status": {"type": ["string", "null"], "description": "Status of the response"}
+                            },
+                            "required": ["message"]
+                        }
                     }
                 ]
                 response = {
@@ -619,6 +656,25 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
                         session_id = tool_args["session_id"]
                         service.delete_session(session_id)
                         result = {"status": "deleted", "session_id": session_id}
+                    elif tool_name == "send_user_response":
+                        session_id = tool_args.get("session_id")
+                        message = tool_args.get("message")
+                        payload = tool_args.get("payload")
+                        role = tool_args.get("role") or "user"
+                        status = tool_args.get("status")
+                        logger.info("📨 AI called send_user_response tool: session_id=%s, message=%s, role=%s, status=%s", session_id, message, role, status)
+                        result = service.record_ai_response(
+                            session_id=session_id,
+                            message=message,
+                            payload=payload,
+                            role=role,
+                            status=status,
+                        )
+                        logger.info("✅ Recorded AI response via tool: %s", result)
+                        # Dispatch the response to OpenWebUI
+                        logger.info("📤 Dispatching AI response via handler")
+                        await response_handler(result)
+                        logger.info("✅ AI response dispatched successfully")
                     else:
                         return JSONResponse({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
                     
@@ -718,6 +774,7 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
 
 def _build_memory_websocket_app(settings: Settings) -> Starlette:
     store = ConversationStore(settings.conversation_db_path)
+    response_handler = _build_response_handler(settings)
     
     # Clean up old messages on startup
     try:
@@ -727,7 +784,7 @@ def _build_memory_websocket_app(settings: Settings) -> Starlette:
     except Exception as exc:
         logger.warning("Failed to clean up old messages: %s", exc)
     
-    memory_server = build_memory_server(store, settings)
+    memory_server = build_memory_server(store, settings, response_handler=response_handler)
 
     async def health(_: Request) -> Response:
         return JSONResponse({"status": "ok"})
@@ -769,13 +826,68 @@ def _build_memory_websocket_app(settings: Settings) -> Starlette:
             
             elif method == "tools/list":
                 # List tools
-                tools = []
-                for tool_name, tool in memory_server._mcp_server.tools.items():
-                    tools.append({
-                        "name": tool_name,
-                        "description": tool.description,
-                        "inputSchema": tool.inputSchema
-                    })
+                tools = [
+                    {
+                        "name": "list_conversations",
+                        "description": "Return the most recently updated sessions stored in the memory DB.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "limit": {"type": ["integer", "null"], "description": "Maximum number of sessions to return"}
+                            }
+                        }
+                    },
+                    {
+                        "name": "get_conversation",
+                        "description": "Dump role/content/metadata for a session.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session_id": {"type": "string", "description": "Session ID to retrieve"},
+                                "limit": {"type": ["integer", "null"], "description": "Maximum number of messages to return"}
+                            },
+                            "required": ["session_id"]
+                        }
+                    },
+                    {
+                        "name": "recall_conversation_context",
+                        "description": "Return a context block plus separated user/assistant turns for a session.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session_id": {"type": "string", "description": "Session ID to recall"},
+                                "limit": {"type": ["integer", "null"], "description": "Maximum number of messages to include"}
+                            },
+                            "required": ["session_id"]
+                        }
+                    },
+                    {
+                        "name": "delete_conversation",
+                        "description": "Remove a stored session and all of its messages.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session_id": {"type": "string", "description": "Session ID to delete"}
+                            },
+                            "required": ["session_id"]
+                        }
+                    },
+                    {
+                        "name": "send_user_response",
+                        "description": "Send the AI response back to the user and OpenWebUI. MUST be called with your response message after receiving a prompt. This records the response in conversation memory and sends it to the client.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session_id": {"type": ["string", "null"], "description": "Session ID to record response in"},
+                                "message": {"type": ["string", "null"], "description": "The response message content from the AI"},
+                                "payload": {"type": ["object", "null"], "description": "Additional payload data"},
+                                "role": {"type": ["string", "null"], "description": "Role of the message sender (defaults to 'user')"},
+                                "status": {"type": ["string", "null"], "description": "Status of the response"}
+                            },
+                            "required": ["message"]
+                        }
+                    }
+                ]
                 response = {
                     "jsonrpc": "2.0",
                     "id": id,
@@ -787,12 +899,47 @@ def _build_memory_websocket_app(settings: Settings) -> Starlette:
                 # Call tool
                 tool_name = params.get("name")
                 tool_args = params.get("arguments", {})
-                if tool_name not in memory_server._mcp_server.tools:
-                    return JSONResponse({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
                 
-                tool = memory_server._mcp_server.tools[tool_name]
+                service = MemoryService(store, settings)
+                
                 try:
-                    result = await tool(**tool_args)
+                    if tool_name == "list_conversations":
+                        limit = tool_args.get("limit")
+                        result = {"sessions": service.list_sessions(limit=limit)}
+                    elif tool_name == "get_conversation":
+                        session_id = tool_args["session_id"]
+                        limit = tool_args.get("limit")
+                        result = service.conversation_detail(session_id, limit)
+                    elif tool_name == "recall_conversation_context":
+                        session_id = tool_args["session_id"]
+                        limit = tool_args.get("limit")
+                        result = service.recall_memory(session_id, limit)
+                    elif tool_name == "delete_conversation":
+                        session_id = tool_args["session_id"]
+                        service.delete_session(session_id)
+                        result = {"status": "deleted", "session_id": session_id}
+                    elif tool_name == "send_user_response":
+                        session_id = tool_args.get("session_id")
+                        message = tool_args.get("message")
+                        payload = tool_args.get("payload")
+                        role = tool_args.get("role") or "user"
+                        status = tool_args.get("status")
+                        logger.info("📨 AI called send_user_response tool: session_id=%s, message=%s, role=%s, status=%s", session_id, message, role, status)
+                        result = service.record_ai_response(
+                            session_id=session_id,
+                            message=message,
+                            payload=payload,
+                            role=role,
+                            status=status,
+                        )
+                        logger.info("✅ Recorded AI response via tool: %s", result)
+                        # Dispatch the response to OpenWebUI
+                        logger.info("📤 Dispatching AI response via handler")
+                        await response_handler(result)
+                        logger.info("✅ AI response dispatched successfully")
+                    else:
+                        return JSONResponse({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
+                    
                     response = {
                         "jsonrpc": "2.0",
                         "id": id,

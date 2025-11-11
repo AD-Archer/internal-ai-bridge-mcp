@@ -89,13 +89,40 @@ All settings are provided via environment variables (loadable from a `.env` file
 | `get_conversation` | Tool | `{session_id, limit?}` → retrieves messages for a specific session. |
 | `recall_conversation_context` | Tool | `{session_id, limit?}` → returns formatted context block for a session. |
 | `delete_conversation` | Tool | `{session_id}` → removes a conversation session. |
+| `record_ai_response` | Tool | `{session_id?, message?, payload?, role?, status?}` → saves AI/tool responses via the memory MCP (preferred over `/callback`). |
 | `external-ai://webhooks` | Resource | JSON summary of configured webhook aliases for discovery. |
-| `external-ai://messages` | Resource | JSON list of follow-up messages sent by the AI via `/callback`. |
+| `external-ai://messages` | Resource | JSON list of follow-up messages captured by `record_ai_response` (or the legacy `/callback`). |
 | `memory://sessions` | Resource | JSON list of conversation sessions. |
 | `memory://health` | Resource | Health status of the memory service. |
 
-## Callback Endpoint for AI Follow-Ups
-Your in-house AI can send follow-up messages back to the MCP server by POSTing JSON to `/callback`. This allows the AI to "talk back" even though the webhook is one-way.
+## Recording AI Follow-Ups
+The recommended way to send responses back into the bridge is to call the `record_ai_response` MCP tool that ships with the memory server. It is available over stdio/WebSocket as well as JSON-RPC at `/mcp/memory`. This keeps everything inside the same MCP transport that downstream agents already use for recall.
+
+Example JSON-RPC call over HTTP:
+
+```bash
+curl -X POST https://external-ai-test.archer.software/mcp/memory \
+  -H "Content-Type: application/json" \
+  -d '{
+        "jsonrpc":"2.0",
+        "id":"1",
+        "method":"tools/call",
+        "params":{
+          "name":"record_ai_response",
+          "arguments":{
+            "session_id":"123",
+            "status":"complete",
+            "message":"Task done",
+            "payload":{"sessionID":"123","message":"Task done","status":"complete"}
+          }
+        }
+      }'
+```
+
+The tool automatically stores the message, keeps the metadata payload, and notifies any waiting OpenAI-compatible clients plus the optional `FRONTEND_WEBHOOK_URL`.
+
+### Legacy `/callback`
+If your AI stack cannot speak MCP yet, you can continue POSTing JSON to `/callback`. The same validation rules apply and the request is internally routed through `record_ai_response`, so both transports behave identically.
 
 Expected payload structure (all fields optional):
 ```json
@@ -121,7 +148,7 @@ The MCP client can then read these messages via the `external-ai://messages` res
 The return values from tools are raw JSON dictionaries—structure them however your in-house AI responds. Errors from the webhook surface back to the MCP client as tool failures so the model can retry or ask for clarification.
 
 ## Conversation History API
-Every call flowing through `/v1/chat/completions` (and the matching callback) is recorded in a lightweight SQLite database. This enables two behaviors:
+Every call flowing through `/v1/chat/completions` (and the matching response recorded via `record_ai_response` or `/callback`) is stored in a lightweight SQLite database. This enables two behaviors:
 
 1. Previous exchanges for the same `sessionID` are summarised and prepended when a new prompt is forwarded to your AI webhook, so the backend receives awareness of the running conversation.
 2. Operators (or downstream AI services such as external-ai) can pull the history over HTTP, inspect it, or purge it.

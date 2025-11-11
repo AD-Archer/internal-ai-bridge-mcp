@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
@@ -27,6 +27,8 @@ SESSION_KEY_ALIASES = {
     "conversation",
     "x_conversation_id",
 }
+
+ALLOWED_RESPONSE_STATUSES = {"info", "success", "error", "complete"}
 
 
 class SessionNotFoundError(RuntimeError):
@@ -100,10 +102,88 @@ class MemoryService:
     def delete_session(self, session_id: str) -> None:
         self.store.delete_session(session_id)
 
+    def record_ai_response(
+        self,
+        *,
+        session_id: str | None = None,
+        message: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+        role: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist an AI response (or any role) into the conversation history."""
+        if payload is not None and not isinstance(payload, Mapping):
+            raise ValueError("payload must be a JSON object.")
 
-def register_memory_mcp_surface(mcp: FastMCP, store: ConversationStore, settings: Settings) -> None:
+        payload_dict: dict[str, Any] = dict(payload or {})
+        candidate_session = session_id or _extract_session_id(payload_dict)
+        if not candidate_session:
+            raise ValueError("session_id is required to record a response.")
+
+        resolved_status = status or payload_dict.get("status")
+        if resolved_status:
+            if resolved_status not in ALLOWED_RESPONSE_STATUSES:
+                raise ValueError(
+                    f"Invalid status '{resolved_status}'. Expected one of: {sorted(ALLOWED_RESPONSE_STATUSES)}."
+                )
+            payload_dict.setdefault("status", resolved_status)
+
+        resolved_role = role or payload_dict.get("role") or "assistant"
+        resolved_message = message
+        message_inferred = False
+        if resolved_message is None:
+            for key in ("message", "payload_summary", "content"):
+                value = payload_dict.get(key)
+                if value:
+                    resolved_message = str(value)
+                    break
+        if resolved_message is None:
+            resolved_message = json.dumps(payload_dict, ensure_ascii=False)
+            message_inferred = True
+
+        payload_dict.setdefault("sessionID", candidate_session)
+        payload_dict.setdefault("session_id", candidate_session)
+        payload_dict.setdefault("role", resolved_role)
+        payload_dict.setdefault("message", resolved_message)
+
+        self.store.record_message(
+            candidate_session,
+            resolved_role,
+            resolved_message,
+            metadata=payload_dict,
+        )
+
+        return {
+            "session_id": candidate_session,
+            "role": resolved_role,
+            "message": resolved_message,
+            "status": resolved_status,
+            "stored": True,
+            "message_inferred": message_inferred,
+            "payload": payload_dict,
+        }
+
+
+ResponseHook = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+def register_memory_mcp_surface(
+    mcp: FastMCP,
+    store: ConversationStore,
+    settings: Settings,
+    *,
+    response_handler: ResponseHook | None = None,
+) -> None:
     """Attach memory tools/resources to an existing MCP server."""
     service = MemoryService(store, settings)
+
+    async def _dispatch_response(record: dict[str, Any]) -> None:
+        if response_handler is None:
+            return
+        try:
+            await response_handler(record)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Response handler failed: %s", exc)
 
     @mcp.resource("memory://sessions")
     def sessions_resource() -> str:
@@ -140,8 +220,40 @@ def register_memory_mcp_surface(mcp: FastMCP, store: ConversationStore, settings
         service.delete_session(session_id)
         return {"status": "deleted", "session_id": session_id}
 
+    @mcp.tool()
+    async def send_user_response(
+        *,
+        session_id: str | None = None,
+        message: str | None = None,
+        payload: dict[str, Any] | None = None,
+        role: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Send a user response into the conversation memory.
 
-def build_memory_server(store: ConversationStore, settings: Settings) -> FastMCP:
+        Provide either a session_id argument or embed it within the payload as any of
+        sessionID/session_id/session, etc. If message is omitted the service will
+        fall back to payload["message"] or serialize the payload for storage.
+        """
+
+        record = service.record_ai_response(
+            session_id=session_id,
+            message=message,
+            payload=payload,
+            role=role or "user",
+            status=status,
+        )
+        await _dispatch_response(record)
+        return record
+
+
+def build_memory_server(
+    store: ConversationStore,
+    settings: Settings,
+    *,
+    response_handler: ResponseHook | None = None,
+) -> FastMCP:
     """Create a standalone MCP server dedicated to memory operations."""
     mcp = FastMCP(
         name="conversation-memory",
@@ -152,7 +264,7 @@ def build_memory_server(store: ConversationStore, settings: Settings) -> FastMCP
         ),
         website_url="https://modelcontextprotocol.io",
     )
-    register_memory_mcp_surface(mcp, store, settings)
+    register_memory_mcp_surface(mcp, store, settings, response_handler=response_handler)
     return mcp
 
 

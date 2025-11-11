@@ -793,8 +793,10 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         Route("/v1/models", openai_models),
         Route("/mcp/openai/v1/chat/completions", openai_chat, methods=["POST"]),
         Route("/mcp/hook", mcp_memory_http, methods=["POST"]),
+        Route("/mcp/memory", mcp_memory_http, methods=["POST"]),
         WebSocketRoute("/mcp/openai", mcp_ws),
         WebSocketRoute("/mcp/hook", mcp_memory_ws),
+        WebSocketRoute("/mcp/memory", mcp_memory_ws),
     ] + memory_routes
     middleware = _build_middleware(settings, exempt_paths={"/healthz"})
 
@@ -1000,7 +1002,9 @@ def _build_memory_websocket_app(settings: Settings) -> Starlette:
         Route("/", index),
         Route("/healthz", health),
         Route("/mcp/hook", mcp_memory_http, methods=["POST"]),
+        Route("/mcp/memory", mcp_memory_http, methods=["POST"]),
         WebSocketRoute("/mcp/hook", mcp_memory_ws),
+        WebSocketRoute("/mcp/memory", mcp_memory_ws),
     ] + memory_routes
     middleware = _build_middleware(settings, exempt_paths={"/healthz"})
     return Starlette(routes=routes, middleware=middleware)

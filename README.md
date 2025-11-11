@@ -110,7 +110,7 @@ All settings are provided via environment variables (loadable from a `.env` file
 | `memory://health` | Resource | Health status of the memory service. |
 
 ## Recording AI Follow-Ups
-The recommended way to send responses back into the bridge is to call the `record_ai_response` MCP tool that ships with the memory server. It is available over stdio/WebSocket as well as JSON-RPC at `/mcp/hook`. This keeps everything inside the same MCP transport that downstream agents already use for recall.
+The recommended way to send responses back into the bridge is to call the `record_ai_response` MCP tool that ships with the memory server. It is available over stdio/WebSocket as well as JSON-RPC at `/mcp/hook` (alias `/mcp/memory`). This keeps everything inside the same MCP transport that downstream agents already use for recall.
 
 Example JSON-RPC call over HTTP:
 
@@ -223,7 +223,7 @@ If you need the AI webhook to see fewer/more prior turns, change `CONVERSATION_H
 
 If you use the OpenWebUI MCP proxy (WebSocket transport), point it to `https://<host>:8765/mcp/openai` (subprotocol: `mcp`).
 
-For HTTP-based MCP clients, use `https://<host>:8765/mcp/hook` with JSON-RPC 2.0 POST requests.
+For HTTP-based MCP clients, use `https://<host>:8765/mcp/hook` (or `/mcp/memory`) with JSON-RPC 2.0 POST requests.
 
 ## Connecting n8n
 - Add an HTTP Request or Webhook node that calls `http://localhost:8765/mcp` using the MCP WebSocket protocol (subprotocol `mcp`).

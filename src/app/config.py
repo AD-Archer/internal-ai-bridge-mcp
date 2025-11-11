@@ -32,6 +32,7 @@ class Settings(BaseModel):
     ai_timeout: float = Field(default=30.0, gt=0)
     extra_webhooks: dict[str, WebhookTarget] = Field(default_factory=dict)
     frontend_webhook_url: HttpUrl | None = None
+    model_name: str = Field(default="external-ai")
 
     @classmethod
     def _parse_extra_webhooks(cls, raw: str | None) -> dict[str, WebhookTarget]:
@@ -78,6 +79,7 @@ class Settings(BaseModel):
                 ai_timeout=timeout,
                 extra_webhooks=extra_webhooks,
                 frontend_webhook_url=values.get("FRONTEND_WEBHOOK_URL"),
+                model_name=values.get("MODEL_NAME", "external-ai"),
             )
         except ValidationError as exc:
             raise SettingsError("Invalid configuration values.") from exc

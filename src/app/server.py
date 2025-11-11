@@ -339,10 +339,10 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
             "object": "list",
             "data": [
                 {
-                    "id": "external-ai",
+                    "id": settings.model_name,
                     "object": "model",
                     "created": 1640995200,
-                    "owned_by": "external-ai"
+                    "owned_by": "Antonio Archer Custom MCP server"
                 }
             ]
         }
@@ -399,7 +399,7 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
                 "id": f"chatcmpl-{conversation_id}",
                 "object": "chat.completion",
                 "created": int(time.time()),
-                "model": "external-ai",
+                "model": settings.model_name,
                 "choices": [
                     {
                         "index": 0,

@@ -26,4 +26,4 @@ export ENV_FILE=.env
 
 echo "Loading config from .env..."
 echo "Starting uvicorn server on http://0.0.0.0:8765 (reload enabled)..."
-uvicorn external_ai_mcp.asgi:app --host 0.0.0.0 --port 8765 --reload
+uvicorn app.asgi:app --host 0.0.0.0 --port 8765 --reload

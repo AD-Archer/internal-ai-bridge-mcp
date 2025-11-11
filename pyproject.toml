@@ -1,6 +1,6 @@
 [project]
 name = "external-ai-mcp"
-version = "1.0.0"
+version = "1.0.1"
 description = "Model Context Protocol bridge that forwards OpenWebUI/n8n traffic to an in-house AI webhook."
 readme = "README.md"
 requires-python = ">=3.10"

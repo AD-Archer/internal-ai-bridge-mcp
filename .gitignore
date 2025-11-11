@@ -141,3 +141,6 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+
+ninjacat-test-ingressroute.yaml
+ninjacat-test-service-external.yaml

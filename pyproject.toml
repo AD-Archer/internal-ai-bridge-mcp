@@ -1,6 +1,6 @@
 [project]
-name = "ninjacat-mcp"
-version = "0.1.0"
+name = "external-ai-mcp"
+version = "1.0.0"
 description = "Model Context Protocol bridge that forwards OpenWebUI/n8n traffic to an in-house AI webhook."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,7 +20,7 @@ dev = [
 ]
 
 [project.scripts]
-ninjacat-mcp = "ninjacat_mcp.cli:main"
+external-ai = "external-ai.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

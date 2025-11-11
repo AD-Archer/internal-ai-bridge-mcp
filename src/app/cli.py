@@ -11,7 +11,7 @@ from .ai_client import AIWebhookError
 from .config import SettingsError, load_settings
 from .server import run_stdio, run_websocket
 
-app = typer.Typer(help="Run the Ninjacat MCP bridge service.")
+app = typer.Typer(help="Run the external-ai MCP bridge service.")
 
 
 @app.command()
@@ -55,7 +55,7 @@ def websocket(
 
 
 def main() -> None:
-    """Entrypoint for the `ninjacat-mcp` console script."""
+    """Entrypoint for the `external-ai-mcp` console script."""
     app()
 
 

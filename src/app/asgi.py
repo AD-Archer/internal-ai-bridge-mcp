@@ -2,7 +2,7 @@
 
 This module exposes a top-level `app` variable so you can run:
 
-    uvicorn ninjacat_mcp.asgi:app --host 0.0.0.0 --port 8765
+    uvicorn external-ai_mcp.asgi:app --host 0.0.0.0 --port 8765
 
 It will attempt to load configuration from the environment (or a `.env` file
 if you export `ENV_FILE` or create one in the project root). If required
@@ -32,7 +32,7 @@ def _make_fallback_app(error: Exception) -> Starlette:
 
     async def index(_: object) -> Response:
         msg = (
-            "Ninjacat MCP Bridge is not configured. "
+            "external-ai MCP Bridge is not configured. "
             "Set AI_WEBHOOK_URL in the environment or provide an .env file."
         )
         return PlainTextResponse(msg)

@@ -42,15 +42,15 @@ def build_server(settings: Settings, client: AIWebhookClient | None = None) -> F
     )
 
     instructions = (
-        "You are connected to the Ninjacat MCP bridge. "
+        "You are connected to the external-ai MCP bridge. "
         "Use the `start_ai_message` tool to send prompts to the in-house AI webhook. "
         "Use `trigger_webhook` to reach any additional named webhooks defined in configuration "
         "or by specifying an explicit URL. "
-        "Check `ninjacat://messages` for any follow-up messages sent by the AI via callback."
+        "Check `external-ai://messages` for any follow-up messages sent by the AI via callback."
     )
 
     mcp = FastMCP(
-        name="Ninjacat MCP Bridge",
+        name="external-ai MCP Bridge",
         instructions=instructions,
         website_url="https://openwebui.com",
     )
@@ -134,7 +134,7 @@ def build_server(settings: Settings, client: AIWebhookClient | None = None) -> F
 
         return ai_response
 
-    @mcp.resource("ninjacat://webhooks")
+    @mcp.resource("external-ai://webhooks")
     def list_webhooks() -> str:
         """Expose configured webhook targets to the client."""
         summary = {
@@ -148,7 +148,7 @@ def build_server(settings: Settings, client: AIWebhookClient | None = None) -> F
         }
         return json.dumps(summary, indent=2)
 
-    @mcp.resource("ninjacat://messages")
+    @mcp.resource("external-ai://messages")
     def list_callback_messages() -> str:
         """Return any follow-up messages sent by the AI via the /callback endpoint."""
         return json.dumps(callback_messages, indent=2)
@@ -167,7 +167,7 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         return JSONResponse({"status": "ok"})
 
     async def index(_: Request) -> Response:
-        return PlainTextResponse("Ninjacat MCP Bridge WebSocket endpoint at /mcp/openai.")
+        return PlainTextResponse("external-ai MCP Bridge WebSocket endpoint at /mcp/openai.")
 
     async def callback(request: Request) -> Response:
         """Endpoint for AI to send follow-up messages."""
@@ -230,10 +230,10 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         schema = {
             "openapi": "3.0.3",
             "info": {
-                "title": "Ninjacat MCP Bridge",
+                "title": "external-ai MCP Bridge",
                 "version": "0.1.0",
                 "description": (
-                    "Minimal OpenAPI description exposing health checks for the Ninjacat MCP bridge. "
+                    "Minimal OpenAPI description exposing health checks for the external-ai MCP bridge. "
                     "The actual MCP interaction occurs over the WebSocket endpoint documented in the "
                     "x-mcp extension."
                 ),
@@ -285,7 +285,7 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         schema = {
             "openapi": "3.0.3",
             "info": {
-                "title": "Ninjacat Chat Completions",
+                "title": "external-ai Chat Completions",
                 "version": "1.0.0",
                 "description": "OpenAI-compatible chat completions API"
             },
@@ -339,10 +339,10 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
             "object": "list",
             "data": [
                 {
-                    "id": "ninjacat",
+                    "id": "external-ai",
                     "object": "model",
                     "created": 1640995200,
-                    "owned_by": "ninjacat"
+                    "owned_by": "external-ai"
                 }
             ]
         }
@@ -399,7 +399,7 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
                 "id": f"chatcmpl-{conversation_id}",
                 "object": "chat.completion",
                 "created": int(time.time()),
-                "model": "ninjacat",
+                "model": "external-ai",
                 "choices": [
                     {
                         "index": 0,

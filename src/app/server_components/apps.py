@@ -232,11 +232,30 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
             if not prompt:
                 return JSONResponse({"error": "No user message"}, status_code=400)
 
-            supplied_session = (
-                data.get("session_id")
-                or data.get("sessionID")
-                or data.get("conversation_id")
-            )
+            def _extract_session_id(payload: dict[str, Any]) -> str | None:
+                """Find a caller-provided session identifier, recursing into common wrappers."""
+                candidate_keys = (
+                    "session_id",
+                    "sessionID",
+                    "sessionId",
+                    "conversation_id",
+                    "conversationID",
+                    "conversationId",
+                )
+                for key in candidate_keys:
+                    value = payload.get(key)
+                    if isinstance(value, str) and value:
+                        return value
+
+                for nested_key in ("body", "payload", "data"):
+                    nested = payload.get(nested_key)
+                    if isinstance(nested, dict):
+                        nested_value = _extract_session_id(nested)
+                        if nested_value:
+                            return nested_value
+                return None
+
+            supplied_session = _extract_session_id(data)
             session_id = supplied_session or str(uuid.uuid4())
 
             history = store.get_messages(session_id, limit=settings.conversation_history_limit)
@@ -244,11 +263,14 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
             if history:
                 history_text = format_history_for_prompt(history)
             notice = (
-                f" **NOTICE: this is an automated message sent via webhook. "
-                f"When you have a response, you MUST call the `send_user_response` MCP tool with your response. "
-                f"This is the ONLY way to send your response back to the user and OpenWebUI. "
-                f"Available memory MCP tools: list_conversations, get_conversation, recall_conversation_context, send_user_response. "
-                f"Current conversation_id/session_id: {session_id}**"
+                f"You are a memory coordination assistant for the NinjaCat service.\n\n"
+                f"**Instructions:**\n"
+                f"1. Use the available MCP tools listed below to process the user's request.\n"
+                f"2. Recall the full context of the current conversation using the `recall_conversation_context` tool and the provided session ID.\n"
+                f"3. Even if no relevant information is found, you MUST respond using `send_user_response`.\n"
+                f"4. `send_user_response` is the ONLY valid way to reply to the user and OpenWebUI.\n\n"
+                f"**Available MCP tools:** list_conversations, get_conversation, recall_conversation_context, send_user_response\n"
+                f"**Session ID:** {session_id}\n"
             )
             final_prompt = prompt
             if history_text:

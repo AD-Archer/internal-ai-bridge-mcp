@@ -149,6 +149,27 @@ class ConversationStore:
         with self._connect() as conn:
             conn.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
 
+    def delete_old_messages(self, retention_days: int) -> int:
+        """Delete messages older than the specified number of days. Returns number of messages deleted."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM messages
+                WHERE created_at < datetime('now', '-{} days')
+                """.format(retention_days)
+            )
+            deleted_count = cursor.rowcount
+            
+            # Clean up orphaned sessions (sessions with no messages)
+            conn.execute(
+                """
+                DELETE FROM sessions
+                WHERE session_id NOT IN (SELECT DISTINCT session_id FROM messages)
+                """
+            )
+            
+            return deleted_count
+
 
 def format_history_for_prompt(messages: Iterable[ConversationMessage]) -> str:
     """Render stored history into a readable transcript string."""

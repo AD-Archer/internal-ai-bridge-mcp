@@ -35,6 +35,7 @@ class Settings(BaseModel):
     model_name: str = Field(default="external-ai")
     conversation_db_path: Path = Field(default=Path("conversation_history.db"))
     conversation_history_limit: int = Field(default=20, gt=0, le=200)
+    message_retention_days: int = Field(default=14, ge=1)
 
     @classmethod
     def _parse_extra_webhooks(cls, raw: str | None) -> dict[str, WebhookTarget]:
@@ -85,6 +86,14 @@ class Settings(BaseModel):
         if history_limit <= 0:
             raise SettingsError("CONVERSATION_HISTORY_LIMIT must be greater than zero.")
 
+        retention_days_raw = values.get("MESSAGE_RETENTION_DAYS", "14")
+        try:
+            retention_days = int(retention_days_raw)
+        except ValueError as exc:
+            raise SettingsError("MESSAGE_RETENTION_DAYS must be an integer.") from exc
+        if retention_days < 1:
+            raise SettingsError("MESSAGE_RETENTION_DAYS must be at least 1.")
+
         try:
             return cls(
                 ai_webhook_url=webhook_url,
@@ -95,6 +104,7 @@ class Settings(BaseModel):
                 model_name=values.get("MODEL_NAME", "external-ai"),
                 conversation_db_path=db_path,
                 conversation_history_limit=history_limit,
+                message_retention_days=retention_days,
             )
         except ValidationError as exc:
             raise SettingsError("Invalid configuration values.") from exc

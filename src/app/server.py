@@ -174,6 +174,15 @@ async def run_stdio(settings: Settings) -> None:
 
 def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookClient | None = None) -> Starlette:
     store = ConversationStore(settings.conversation_db_path)
+    
+    # Clean up old messages on startup
+    try:
+        deleted_count = store.delete_old_messages(settings.message_retention_days)
+        if deleted_count > 0:
+            logger.info("Cleaned up %d old messages (older than %d days)", deleted_count, settings.message_retention_days)
+    except Exception as exc:
+        logger.warning("Failed to clean up old messages: %s", exc)
+    
     memory_server = build_memory_server(store, settings)
 
     async def health(_: Request) -> Response:
@@ -413,8 +422,10 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
             if history:
                 history_text = format_history_for_prompt(history)
             notice = (
-                " **NOTICE: this is an automated message, this message has been sent using a "
-                "webhook. please respond using your webhook tool**"
+                f" **NOTICE: this is an automated message, this message has been sent using a "
+                f"webhook. please respond using your webhook tool. "
+                f"You have access to memory MCP tools: list_conversations, get_conversation, recall_conversation_context. "
+                f"Current conversation_id/session_id: {session_id}**"
             )
             final_prompt = prompt
             if history_text:
@@ -707,6 +718,15 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
 
 def _build_memory_websocket_app(settings: Settings) -> Starlette:
     store = ConversationStore(settings.conversation_db_path)
+    
+    # Clean up old messages on startup
+    try:
+        deleted_count = store.delete_old_messages(settings.message_retention_days)
+        if deleted_count > 0:
+            logger.info("Cleaned up %d old messages (older than %d days)", deleted_count, settings.message_retention_days)
+    except Exception as exc:
+        logger.warning("Failed to clean up old messages: %s", exc)
+    
     memory_server = build_memory_server(store, settings)
 
     async def health(_: Request) -> Response:

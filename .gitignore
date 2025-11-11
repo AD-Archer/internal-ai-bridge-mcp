@@ -56,6 +56,7 @@ coverage.xml
 *.log
 local_settings.py
 db.sqlite3
+conversation_history.db
 
 # Flask stuff:
 instance/
@@ -120,7 +121,7 @@ dmypy.json
 *.swp
 *.swo
 *~
-
+*instructions.md
 # OS
 .DS_Store
 .DS_Store?

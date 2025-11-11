@@ -33,6 +33,8 @@ class Settings(BaseModel):
     extra_webhooks: dict[str, WebhookTarget] = Field(default_factory=dict)
     frontend_webhook_url: HttpUrl | None = None
     model_name: str = Field(default="external-ai")
+    conversation_db_path: Path = Field(default=Path("conversation_history.db"))
+    conversation_history_limit: int = Field(default=20, gt=0, le=200)
 
     @classmethod
     def _parse_extra_webhooks(cls, raw: str | None) -> dict[str, WebhookTarget]:
@@ -72,6 +74,17 @@ class Settings(BaseModel):
 
         extra_webhooks = cls._parse_extra_webhooks(values.get("EXTRA_WEBHOOKS"))
 
+        db_path_raw = values.get("CONVERSATION_DB_PATH", "conversation_history.db")
+        db_path = Path(db_path_raw)
+
+        history_limit_raw = values.get("CONVERSATION_HISTORY_LIMIT", "20")
+        try:
+            history_limit = int(history_limit_raw)
+        except ValueError as exc:
+            raise SettingsError("CONVERSATION_HISTORY_LIMIT must be an integer.") from exc
+        if history_limit <= 0:
+            raise SettingsError("CONVERSATION_HISTORY_LIMIT must be greater than zero.")
+
         try:
             return cls(
                 ai_webhook_url=webhook_url,
@@ -80,6 +93,8 @@ class Settings(BaseModel):
                 extra_webhooks=extra_webhooks,
                 frontend_webhook_url=values.get("FRONTEND_WEBHOOK_URL"),
                 model_name=values.get("MODEL_NAME", "external-ai"),
+                conversation_db_path=db_path,
+                conversation_history_limit=history_limit,
             )
         except ValidationError as exc:
             raise SettingsError("Invalid configuration values.") from exc

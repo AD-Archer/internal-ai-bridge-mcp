@@ -1,4 +1,4 @@
-# Ninjacat MCP Bridge
+# Internal AI MCP Bridge
 
 This project exposes a Model Context Protocol (MCP) bridge so OpenWebUI (or any MCP-capable client such as an n8n flow) can talk to an in-house AI platform that is reachable via HTTP webhooks. The bridge publishes MCP tools and resources that map directly onto the webhook workflows.
 
@@ -6,8 +6,10 @@ This project exposes a Model Context Protocol (MCP) bridge so OpenWebUI (or any 
 - `start_ai_message` tool sends user prompts to your AI webhook and returns the generated response.
 - `trigger_webhook` tool calls any configured outbound webhook (e.g. n8n nodes, Slack notifications).
 - `call_ai_and_webhook` tool combines both steps for the common "ask AI then notify" pattern.
-- Resource `ninjacat://webhooks` lists available webhook aliases so clients can discover them.
+- Resource `external-ai://webhooks` lists available webhook aliases so clients can discover them.
 - Ships with both stdio (for OpenWebUI desktop adapters) and WebSocket transports.
+- Conversation transcripts are persisted in SQLite so each `sessionID` keeps its own memory and can be inspected later.
+- Dedicated `/memory/recall` endpoint (GET or POST) lets downstream AI services pull the latest context for any `sessionID` on demand.
 - **Automatic retry** on 5xx errors and timeouts with exponential backoff (up to 3 attempts).
 - Provides a lightweight OpenAPI document at `/mcp/openapi.json` for clients that probe HTTP metadata.
 
@@ -18,28 +20,28 @@ source .venv/bin/activate
 pip install -e .
 cp .env.example .env
 # edit .env with your webhook URLs/secrets
-ninjacat-mcp stdio --env-file .env
+external-ai stdio --env-file .env
 ```
 
 When running with `stdio`, connect OpenWebUI’s MCP integration to the spawned process. For a standalone WebSocket endpoint:
 
 ```bash
-ninjacat-mcp websocket --env-file .env --host 0.0.0.0 --port 8765
+external-ai websocket --env-file .env --host 0.0.0.0 --port 8765
 ```
 
 Alternatively, you can run the project directly with uvicorn (exposes the same
 WebSocket/HTTP endpoints). The package ships an ASGI entrypoint at
-`ninjacat_mcp.asgi:app` which will try to load settings from the environment
+`external-ai_mcp.asgi:app` which will try to load settings from the environment
 or a `.env` file (set `ENV_FILE` to point at a dotenv file if you prefer).
 
 Example using uvicorn:
 
 ```bash
 # after creating & activating the venv and installing
-uvicorn ninjacat_mcp.asgi:app --host 0.0.0.0 --port 8765 --reload
+uvicorn external-ai_mcp.asgi:app --host 0.0.0.0 --port 8765 --reload
 
 # or specify an explicit dotenv file to load before starting
-ENV_FILE=.env uvicorn ninjacat_mcp.asgi:app --host 0.0.0.0 --port 8765
+ENV_FILE=.env uvicorn external-ai_mcp.asgi:app --host 0.0.0.0 --port 8765
 ```
 
 ## Configuration
@@ -50,6 +52,8 @@ All settings are provided via environment variables (loadable from a `.env` file
 | `AI_WEBHOOK_URL` | ✅ | Full URL of the in-house AI webhook that accepts JSON payloads. |
 | `AI_API_KEY` | optional | Secret added as a `Bearer` token when reaching the AI webhook. |
 | `AI_TIMEOUT` | optional | Request timeout in seconds (defaults to 30). |
+| `CONVERSATION_DB_PATH` | optional | Filesystem path to the SQLite DB that stores session transcripts (`./conversation_history.db` by default). |
+| `CONVERSATION_HISTORY_LIMIT` | optional | Max number of prior messages to feed back into each AI prompt (defaults to 20). |
 | `EXTRA_WEBHOOKS` | optional | JSON object describing named webhook targets. |
 
 Example `EXTRA_WEBHOOKS` value:
@@ -81,8 +85,14 @@ All settings are provided via environment variables (loadable from a `.env` file
 | `start_ai_message` | Tool | `{prompt, conversation_id?, metadata?, attachments?, extra?}` → calls the AI webhook. |
 | `trigger_webhook` | Tool | `{target/name or URL, payload?, method?, headers?}` → triggers named or ad-hoc webhooks. |
 | `call_ai_and_webhook` | Tool | Convenience wrapper that chains `start_ai_message` then (optionally) `trigger_webhook`. |
-| `ninjacat://webhooks` | Resource | JSON summary of configured webhook aliases for discovery. |
-| `ninjacat://messages` | Resource | JSON list of follow-up messages sent by the AI via `/callback`. |
+| `list_conversations` | Tool | `{limit?}` → returns recent conversation sessions from memory. |
+| `get_conversation` | Tool | `{session_id, limit?}` → retrieves messages for a specific session. |
+| `recall_conversation_context` | Tool | `{session_id, limit?}` → returns formatted context block for a session. |
+| `delete_conversation` | Tool | `{session_id}` → removes a conversation session. |
+| `external-ai://webhooks` | Resource | JSON summary of configured webhook aliases for discovery. |
+| `external-ai://messages` | Resource | JSON list of follow-up messages sent by the AI via `/callback`. |
+| `memory://sessions` | Resource | JSON list of conversation sessions. |
+| `memory://health` | Resource | Health status of the memory service. |
 
 ## Callback Endpoint for AI Follow-Ups
 Your in-house AI can send follow-up messages back to the MCP server by POSTing JSON to `/callback`. This allows the AI to "talk back" even though the webhook is one-way.
@@ -101,23 +111,83 @@ Expected payload structure (all fields optional):
 
 Example request:
 ```bash
-curl -X POST https://ninjacat-test.archer.software/callback \
+curl -X POST https://external-ai-test.archer.software/callback \
   -H "Content-Type: application/json" \
   -d '{"sessionID": "123", "status": "complete", "message": "Task done"}'
 ```
 
-The MCP client can then read these messages via the `ninjacat://messages` resource. The server only validates the `status` field if present.
+The MCP client can then read these messages via the `external-ai://messages` resource. The server only validates the `status` field if present.
 
 The return values from tools are raw JSON dictionaries—structure them however your in-house AI responds. Errors from the webhook surface back to the MCP client as tool failures so the model can retry or ask for clarification.
 
+## Conversation History API
+Every call flowing through `/v1/chat/completions` (and the matching callback) is recorded in a lightweight SQLite database. This enables two behaviors:
+
+1. Previous exchanges for the same `sessionID` are summarised and prepended when a new prompt is forwarded to your AI webhook, so the backend receives awareness of the running conversation.
+2. Operators (or downstream AI services such as external-ai) can pull the history over HTTP, inspect it, or purge it.
+
+Available endpoints:
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/conversations?limit=100` | Returns the most recently updated sessions plus message counts. |
+| `GET` | `/conversations/{session_id}` | Dumps the stored messages (role, content, metadata, timestamps) for a session. |
+| `DELETE` | `/conversations/{session_id}` | Removes a session and all of its messages. |
+| `GET/POST` | `/memory/recall` | Returns a ready-to-use context block, broken-out user/assistant turns, and metadata for the requested `session_id`. |
+
+`/memory/recall` accepts JSON **or** query parameters. If you call it without a session it simply replies `{"status":"healthy","requires_session_id":true,...}` so MCP clients can use it as a connectivity probe before they have real data. Example POST body (any of `sessionID`, `sessionId`, `session_id`, `conversationID`, or header `X-Session-ID` will be detected):
+
+```json
+{
+  "sessionID": "2a5bad04-8f0b-4919-b663-88cc8d8e5e32",
+  "limit": 20
+}
+```
+
+GET example:
+
+```
+/memory/recall?sessionID=2a5bad04-8f0b-4919-b663-88cc8d8e5e32&limit=20
+```
+
+Response:
+
+```json
+{
+  "session_id": "2a5bad04-8f0b-4919-b663-88cc8d8e5e32",
+  "messages": [
+    {"role": "user", "content": "tell me what you can do", "created_at": "..."},
+    {"role": "assistant", "content": "I can ...", "created_at": "..."}
+  ],
+  "user_messages": ["tell me what you can do"],
+  "assistant_messages": ["I can ..."],
+  "context_block": "User: ...\nAssistant: ...",
+  "message_count": 2,
+  "limit_applied": 20
+}
+```
+
+Downstream agents can hit this endpoint at the start of every task, feed the `context_block` into their workflow, and decide whether to trim/transform the `user_messages` or `assistant_messages` arrays. The endpoint is standalone (no webhook call required) so it works even if the agent cannot reach the original MCP webhook target.
+
+Every `/memory/recall` request is logged with its method, query parameters, and whether a matching session was found—watch the service logs if you need to debug what Ninjacat is actually sending.
+
+By default transcripts live in `./conversation_history.db`; adjust `CONVERSATION_DB_PATH` in your `.env` if you prefer a different location or persistent volume.
+
+If you need the AI webhook to see fewer/more prior turns, change `CONVERSATION_HISTORY_LIMIT`. A higher number delivers more context but increases payload size.
+
 ## Connecting OpenWebUI
-1. Run `ninjacat-mcp stdio --env-file .env`.
+1. Run `external-ai stdio --env-file .env`.
 2. In OpenWebUI, add a new MCP server and configure it to launch the CLI above (the desktop build uses stdio transports). Provide the same `.env` file in the launch command.
 3. Once connected, the model will see the tools/resources listed above. Prompt the model to “use the start_ai_message tool” and it will forward the request to your webhook.
 
-If you use the OpenWebUI MCP proxy (WebSocket transport), point it to `ws://<host>:8765/mcp` after launching `ninjacat-mcp websocket`.
+If you use the OpenWebUI MCP proxy (WebSocket transport), point it to `https://<host>:8765/mcp/openai` (subprotocol: `mcp`).
+
+For HTTP-based MCP clients, use `https://<host>:8765/mcp/memory` with JSON-RPC 2.0 POST requests.
 
 ## Connecting n8n
+- Add an HTTP Request or Webhook node that calls `http://localhost:8765/mcp` using the MCP WebSocket protocol (subprotocol `mcp`).
+- Alternatively, expose n8n workflows as HTTP endpoints and register them inside `EXTRA_WEBHOOKS`. The MCP tools can then trigger those flows by name without n8n speaking MCP natively.
+- Use the `trigger_webhook` tool to push AI results back into n8n after each inference.
 - Add an HTTP Request or Webhook node that calls `http://localhost:8765/mcp` using the MCP WebSocket protocol (subprotocol `mcp`).
 - Alternatively, expose n8n workflows as HTTP endpoints and register them inside `EXTRA_WEBHOOKS`. The MCP tools can then trigger those flows by name without n8n speaking MCP natively.
 - Use the `trigger_webhook` tool to push AI results back into n8n after each inference.
@@ -125,9 +195,8 @@ If you use the OpenWebUI MCP proxy (WebSocket transport), point it to `ws://<hos
 ## Development
 - Run `./.venv/bin/python -m compileall src` to perform a quick syntax check.
 - `ruff` and `pytest` are included in the optional `dev` extras (`pip install -e .[dev]`).
-- Server wiring lives in `src/ninjacat_mcp/server.py`; HTTP glue is in `src/ninjacat_mcp/ai_client.py`.
+- Server wiring lives in `src/external-ai_mcp/server.py`; HTTP glue is in `src/external-ai_mcp/ai_client.py`.
 
 ## Next Steps
-- Add persistence for conversation state if the AI webhook expects incremental messages.
 - Support streaming responses (SSE/Streamable HTTP) once available from the backend.
 - Introduce authentication on the WebSocket endpoint before exposing it publicly.

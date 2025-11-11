@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to run the Ninjacat MCP server using UV and uvicorn
+# Script to run the External AI MCP server using UV and uvicorn
 # Assumes .env file is in the project root with AI_WEBHOOK_URL set
 
 set -e  # Exit on any error
@@ -8,7 +8,7 @@ set -e  # Exit on any error
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 
-echo "Starting Ninjacat MCP server..."
+echo "Starting External AI MCP server..."
 echo "Project dir: $PROJECT_DIR"
 echo "Virtual env: $VENV_DIR"
 
@@ -26,4 +26,4 @@ export ENV_FILE=.env
 
 echo "Loading config from .env..."
 echo "Starting uvicorn server on http://0.0.0.0:8765 (reload enabled)..."
-uvicorn ninjacat_mcp.asgi:app --host 0.0.0.0 --port 8765 --reload
+uvicorn external_ai_mcp.asgi:app --host 0.0.0.0 --port 8765 --reload

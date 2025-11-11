@@ -243,7 +243,7 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         return JSONResponse({"status": "ok"})
 
     async def index(_: Request) -> Response:
-        return PlainTextResponse("external-ai MCP Bridge WebSocket endpoints at /mcp/openai and /mcp/memory.")
+        return PlainTextResponse("external-ai MCP Bridge WebSocket endpoints at /mcp/openai and /mcp/hook.")
 
     async def callback(request: Request) -> Response:
         """Endpoint for AI to send follow-up messages."""
@@ -756,9 +756,9 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         Route("/v1/chat/completions/openapi.json", openai_openapi),
         Route("/v1/models", openai_models),
         Route("/mcp/openai/v1/chat/completions", openai_chat, methods=["POST"]),
-        Route("/mcp/memory", mcp_memory_http, methods=["POST"]),
+        Route("/mcp/hook", mcp_memory_http, methods=["POST"]),
         WebSocketRoute("/mcp/openai", mcp_ws),
-        WebSocketRoute("/mcp/memory", mcp_memory_ws),
+        WebSocketRoute("/mcp/hook", mcp_memory_ws),
     ] + memory_routes
     middleware = [
         Middleware(
@@ -790,7 +790,7 @@ def _build_memory_websocket_app(settings: Settings) -> Starlette:
         return JSONResponse({"status": "ok"})
 
     async def index(_: Request) -> Response:
-        return PlainTextResponse("Memory MCP server WebSocket endpoint at /mcp/memory.")
+        return PlainTextResponse("Memory MCP server WebSocket endpoint at /mcp/hook.")
 
     async def mcp_memory_http(request: Request) -> Response:
         """Handle MCP protocol over HTTP using JSON-RPC."""
@@ -970,8 +970,8 @@ def _build_memory_websocket_app(settings: Settings) -> Starlette:
     routes = [
         Route("/", index),
         Route("/healthz", health),
-        Route("/mcp/memory", mcp_memory_http, methods=["POST"]),
-        WebSocketRoute("/mcp/memory", mcp_memory_ws),
+        Route("/mcp/hook", mcp_memory_http, methods=["POST"]),
+        WebSocketRoute("/mcp/hook", mcp_memory_ws),
     ] + memory_routes
     middleware = [
         Middleware(

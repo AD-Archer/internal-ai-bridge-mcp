@@ -26,5 +26,5 @@ export ENV_FILE=.env
 
 echo "Loading config from .env..."
 echo "Starting uvicorn server on http://0.0.0.0:8765 (reload enabled)..."
-echo "MCP WebSocket endpoints: ws://0.0.0.0:8765/mcp/openai (main) and ws://0.0.0.0:8765/mcp/memory (memory-only)"
+echo "MCP WebSocket endpoints: ws://0.0.0.0:8765/mcp/openai (main) and ws://0.0.0.0:8765/mcp/hook (memory-only)"
 uvicorn app.asgi:app --host 0.0.0.0 --port 8765 --reload

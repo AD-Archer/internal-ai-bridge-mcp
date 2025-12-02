@@ -1,6 +1,7 @@
 services:
   internal-ai-bridge:
     image: ghcr.io/ad-archer/internal-ai-bridge-mcp:latest
+    container_name: internal-ai-bridge
     restart: unless-stopped
     env_file:
       - .env

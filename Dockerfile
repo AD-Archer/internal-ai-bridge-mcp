@@ -4,7 +4,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ENV_FILE=/app/.env \
-    PORT=8765
+    PORT=8765 \
+    CONVERSATION_DB_PATH=/app/data/conversation_history.db
 
 WORKDIR /app
 
@@ -21,8 +22,9 @@ COPY src ./src
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir .
 
-# Create a non-root user to run the service
-RUN groupadd --system appuser && useradd --system --gid appuser --home /app appuser
+# Create a non-root user and ensure writable data directory
+RUN groupadd --system appuser && useradd --system --gid appuser --home /app appuser && \
+    mkdir -p /app/data && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8765

@@ -78,6 +78,7 @@ docker run --rm -p 8765:8765 \
 ```
 - Container loads `/app/.env` by default (`ENV_FILE` can override).
 - Default port is `8765`; override with `-e PORT=9000`.
+ - Ensure `CONVERSATION_DB_PATH=/app/data/conversation_history.db` in your `.env` (default is set in the image) so the DB lands in the mounted volume.
 
 ## Quick Start (Local dev)
 ```bash

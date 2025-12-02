@@ -44,6 +44,35 @@ uvicorn external-ai_mcp.asgi:app --host 0.0.0.0 --port 8765 --reload
 ENV_FILE=.env uvicorn external-ai_mcp.asgi:app --host 0.0.0.0 --port 8765
 ```
 
+## Docker
+- Build locally: `docker build -t external-ai-mcp .`
+- Run: `docker run --rm -p 8765:8765 --env-file .env -v "$(pwd)/conversation_history.db:/app/conversation_history.db" external-ai-mcp`
+- The image loads environment from `/app/.env` by default (`ENV_FILE` can override). Mount your `.env` or pass env vars directly.
+- Published image (via GitHub Actions): `ghcr.io/ad-archer/external-ai-bridge-mcp:latest` (also tagged per branch, tag, and commit SHA).
+
+### Docker Compose example
+```yaml
+services:
+  external-ai-bridge:
+    image: ghcr.io/ad-archer/external-ai-bridge-mcp:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    # environment:
+      # Override defaults if you prefer not to use .env
+      # AI_WEBHOOK_URL: https://your-ai-service.internal/webhooks/start
+      # MODEL_NAME: your-custom-model-name
+      # PORT: "8765"
+      # ENV_FILE: /app/.env
+      # CONVERSATION_DB_PATH: /app/data/conversation_history.db
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/app/data
+      # Optional: mount a custom env file inside the container
+      # - ./prod.env:/app/.env:ro
+```
+
 ## Configuration
 All settings are provided via environment variables (loadable from a `.env` file).
 
@@ -152,7 +181,7 @@ Expected payload structure (all fields optional):
 
 Example request:
 ```bash
-curl -X POST https://external-ai-test.archer.software/callback \
+curl -X POST https://external-ai-test.yoururl/callback \
   -H "Content-Type: application/json" \
   -d '{"sessionID": "123", "status": "complete", "message": "Task done"}'
 ```

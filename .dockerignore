@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.sqlite
+.env
+.env.*
+.venv/
+.git/
+.github/
+dist/
+build/
+*.egg-info/
+conversation_history.db
+nohup.out
+node_modules/

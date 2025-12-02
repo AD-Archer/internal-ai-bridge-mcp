@@ -1,0 +1,19 @@
+services:
+  external-ai-bridge:
+    image: ghcr.io/ad-archer/external-ai-bridge-mcp:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    # environment:
+      # Override defaults if you prefer not to use .env
+      # AI_WEBHOOK_URL: https://your-ai-service.internal/webhooks/start
+      # MODEL_NAME: your-custom-model-name
+      # PORT: "8765"
+      # ENV_FILE: /app/.env
+      # CONVERSATION_DB_PATH: /app/data/conversation_history.db
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/app/data
+      # Optional: mount a custom env file inside the container
+      # - ./prod.env:/app/.env:ro

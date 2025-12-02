@@ -46,6 +46,10 @@ MODEL_NAME=your-custom-model-name
 # Number of past messages to include when rebuilding context (defaults to 20)
 CONVERSATION_HISTORY_LIMIT=20
 
+# Path where conversation history will be stored (ensure the directory is writable, I do not recommend changing this)
+CONVERSATION_DB_PATH=/app/data/conversation_history.db
+
+
 # Number of days to retain messages before automatic deletion (defaults to 14)
 MESSAGE_RETENTION_DAYS=14
 

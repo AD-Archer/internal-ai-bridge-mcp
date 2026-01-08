@@ -19,6 +19,7 @@ from ..ai_client import AIWebhookClient
 from ..config import Settings
 from ..memory_api import MemoryService, build_memory_routes, build_memory_server
 from ..storage import ConversationStore, format_history_for_prompt
+from ..swagger import openapi_json_handler, swagger_ui_handler
 from .middleware import build_middleware
 from .response_handler import build_response_handler
 from .state import pending_responses
@@ -573,6 +574,8 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
     routes = [
         Route("/", index),
         Route("/healthz", health),
+        Route("/docs", swagger_ui_handler),
+        Route("/openapi.json", openapi_json_handler),
         Route("/callback", callback, methods=["POST"]),
         Route("/mcp/openapi.json", openapi),
         Route("/v1/chat/completions", openai_chat, methods=["POST"]),
@@ -585,7 +588,7 @@ def _build_websocket_app(server: FastMCP, settings: Settings, client: AIWebhookC
         WebSocketRoute("/mcp/hook", mcp_memory_ws),
         WebSocketRoute("/mcp/memory", mcp_memory_ws),
     ] + memory_routes
-    middleware = build_middleware(settings, exempt_paths={"/healthz"})
+    middleware = build_middleware(settings, exempt_paths={"/healthz", "/docs", "/openapi.json"})
 
     return Starlette(routes=routes, middleware=middleware)
 
@@ -787,10 +790,12 @@ def _build_memory_websocket_app(settings: Settings) -> Starlette:
     routes = [
         Route("/", index),
         Route("/healthz", health),
+        Route("/docs", swagger_ui_handler),
+        Route("/openapi.json", openapi_json_handler),
         Route("/mcp/hook", mcp_memory_http, methods=["POST"]),
         Route("/mcp/memory", mcp_memory_http, methods=["POST"]),
         WebSocketRoute("/mcp/hook", mcp_memory_ws),
         WebSocketRoute("/mcp/memory", mcp_memory_ws),
     ] + memory_routes
-    middleware = build_middleware(settings, exempt_paths={"/healthz"})
+    middleware = build_middleware(settings, exempt_paths={"/healthz", "/docs", "/openapi.json"})
     return Starlette(routes=routes, middleware=middleware)

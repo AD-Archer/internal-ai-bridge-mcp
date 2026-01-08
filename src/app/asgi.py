@@ -22,6 +22,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from .config import load_settings, SettingsError
 from .server import build_server, _build_websocket_app
 from .ai_client import AIWebhookClient
+from .swagger import openapi_json_handler, swagger_ui_handler
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,12 @@ def _make_fallback_app(error: Exception) -> Starlette:
         )
         return PlainTextResponse(msg)
 
-    routes = [Route("/", index), Route("/healthz", health)]
+    routes = [
+        Route("/", index),
+        Route("/healthz", health),
+        Route("/docs", swagger_ui_handler),
+        Route("/openapi.json", openapi_json_handler),
+    ]
     return Starlette(routes=routes)
 
 

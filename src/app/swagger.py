@@ -788,63 +788,304 @@ def generate_openapi_schema(request: Request) -> dict[str, Any]:
 
 
 def generate_swagger_html() -> str:
-    """Generate Swagger UI HTML page."""
+    """Generate API documentation HTML page."""
     return """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Internal AI MCP Bridge - API Documentation</title>
-    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css">
     <style>
-        html {
-            box-sizing: border-box;
-            overflow: -moz-scrollbars-vertical;
-            overflow-y: scroll;
-        }
-        *, *:before, *:after {
-            box-sizing: inherit;
-        }
-        body {
+        * {
             margin: 0;
             padding: 0;
+            box-sizing: border-box;
         }
-        .swagger-ui .topbar {
-            background-color: #1b1b1b;
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
         }
-        .swagger-ui .info .title {
-            color: #3b4151;
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        .section {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        .endpoint {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+        .endpoint-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .method {
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-right: 1rem;
+            font-size: 0.85rem;
+        }
+        .method.get { background: #61affe; color: white; }
+        .method.post { background: #49cc90; color: white; }
+        .method.delete { background: #f93e3e; color: white; }
+        .method.ws { background: #fca130; color: white; }
+        .path {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #333;
+        }
+        .description {
+            margin: 0.5rem 0;
+            color: #666;
+        }
+        .json-link {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+        .json-link:hover {
+            background: #764ba2;
+        }
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+        .mcp-tools {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .tool-card {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+        }
+        .tool-card h4 {
+            color: #667eea;
+            margin-bottom: 0.5rem;
         }
     </style>
 </head>
 <body>
-    <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
-    <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-standalone-preset.js"></script>
-    <script>
-        window.onload = function() {
-            const ui = SwaggerUIBundle({
-                url: "./openapi.json",
-                dom_id: '#swagger-ui',
-                deepLinking: true,
-                presets: [
-                    SwaggerUIBundle.presets.apis,
-                    SwaggerUIStandalonePreset
-                ],
-                plugins: [
-                    SwaggerUIBundle.plugins.DownloadUrl
-                ],
-                layout: "StandaloneLayout",
-                defaultModelsExpandDepth: 1,
-                defaultModelExpandDepth: 1,
-                docExpansion: "list",
-                filter: true,
-                showExtensions: true,
-                showCommonExtensions: true
-            });
-            window.ui = ui;
-        };
-    </script>
+    <div class="header">
+        <h1>🚀 Internal AI MCP Bridge API</h1>
+        <p>Complete API documentation for AI and MCP routes</p>
+    </div>
+    
+    <div class="container">
+        <div class="section">
+            <h2>📖 OpenAPI Specification</h2>
+            <p>Access the complete OpenAPI 3.0 specification in JSON format:</p>
+            <p style="margin-top: 1rem;">
+                <a href="./openapi.json" class="json-link">📄 View OpenAPI JSON</a>
+            </p>
+            <div class="info-box" style="margin-top: 1rem;">
+                <strong>📌 Note:</strong> This OpenAPI spec can be imported into tools like Postman, Insomnia, or any OpenAPI-compatible client.
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🏥 Health & Status</h2>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method get">GET</span>
+                    <span class="path">/healthz</span>
+                </div>
+                <p class="description">Health check endpoint - returns service status</p>
+            </div>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method get">GET</span>
+                    <span class="path">/</span>
+                </div>
+                <p class="description">Service information and available endpoints</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🤖 OpenAI Compatible API</h2>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method get">GET</span>
+                    <span class="path">/v1/models</span>
+                </div>
+                <p class="description">List available AI models in OpenAI format</p>
+            </div>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method post">POST</span>
+                    <span class="path">/v1/chat/completions</span>
+                </div>
+                <p class="description">Create chat completions (OpenAI-compatible endpoint)</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🔌 MCP Protocol Endpoints</h2>
+            <div class="info-box">
+                <strong>Model Context Protocol (MCP)</strong> endpoints support both WebSocket and HTTP JSON-RPC connections.
+            </div>
+            
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method ws">WS</span>
+                    <span class="path">/mcp/openai</span>
+                </div>
+                <p class="description">Primary MCP WebSocket endpoint with full AI and memory capabilities</p>
+            </div>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method ws">WS</span>
+                    <span class="path">/mcp/hook</span>
+                </div>
+                <p class="description">Memory-focused MCP WebSocket endpoint</p>
+            </div>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method post">POST</span>
+                    <span class="path">/mcp/hook</span>
+                </div>
+                <p class="description">HTTP endpoint for MCP protocol using JSON-RPC (memory tools)</p>
+            </div>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method post">POST</span>
+                    <span class="path">/mcp/memory</span>
+                </div>
+                <p class="description">Alternative HTTP endpoint for MCP memory protocol</p>
+            </div>
+
+            <h3 style="margin-top: 2rem; color: #667eea;">Available MCP Tools</h3>
+            <div class="mcp-tools">
+                <div class="tool-card">
+                    <h4>list_conversations</h4>
+                    <p>List recent conversation sessions from memory</p>
+                </div>
+                <div class="tool-card">
+                    <h4>get_conversation</h4>
+                    <p>Get all messages for a specific session</p>
+                </div>
+                <div class="tool-card">
+                    <h4>recall_conversation_context</h4>
+                    <p>Get formatted context block for a session</p>
+                </div>
+                <div class="tool-card">
+                    <h4>delete_conversation</h4>
+                    <p>Delete a conversation session and its messages</p>
+                </div>
+                <div class="tool-card">
+                    <h4>send_user_response</h4>
+                    <p>Send response back to user/OpenWebUI</p>
+                </div>
+                <div class="tool-card">
+                    <h4>start_ai_message</h4>
+                    <p>Send a prompt to the AI service (main endpoint only)</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>💾 Memory & Conversations</h2>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method get">GET</span>
+                    <span class="path">/conversations</span>
+                </div>
+                <p class="description">List all conversation sessions with metadata</p>
+            </div>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method get">GET</span>
+                    <span class="path">/conversations/{session_id}</span>
+                </div>
+                <p class="description">Retrieve all messages for a specific session</p>
+            </div>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method delete">DELETE</span>
+                    <span class="path">/conversations/{session_id}</span>
+                </div>
+                <p class="description">Delete a conversation session</p>
+            </div>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method get">GET</span>
+                    <span class="path">/memory/recall</span>
+                </div>
+                <p class="description">Recall conversation memory with formatted context</p>
+            </div>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method post">POST</span>
+                    <span class="path">/memory/recall</span>
+                </div>
+                <p class="description">Recall conversation memory via POST request</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📞 Callbacks</h2>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method post">POST</span>
+                    <span class="path">/callback</span>
+                </div>
+                <p class="description">Endpoint for AI service to send follow-up messages and responses</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🔐 Authentication</h2>
+            <div class="info-box">
+                <p><strong>Bearer Token Authentication</strong> can be enabled via the <code>ENABLE_BEARER_AUTH</code> environment variable.</p>
+                <p style="margin-top: 0.5rem;">When enabled, most routes require an <code>Authorization: Bearer &lt;token&gt;</code> header.</p>
+                <p style="margin-top: 0.5rem;"><strong>Exempt routes:</strong> <code>/healthz</code>, <code>/docs</code>, <code>/openapi.json</code></p>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 """

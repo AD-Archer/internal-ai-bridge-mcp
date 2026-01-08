@@ -64,7 +64,7 @@ def generate_openapi_schema(request: Request) -> dict[str, Any]:
                             "content": {
                                 "text/plain": {
                                     "schema": {"type": "string"},
-                                    "example": "external-ai MCP Bridge WebSocket endpoints at /mcp/openai and /mcp/hook."
+                                    "example": "Internal AI MCP Bridge WebSocket endpoints at /mcp/openai and /mcp/hook."
                                 }
                             }
                         }

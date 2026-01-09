@@ -13,15 +13,17 @@ echo "Project dir: $PROJECT_DIR"
 echo "Virtual env: $VENV_DIR"
 
 # Check if venv exists
-if [ ! -d "$VENV_DIR" ]; then
-    echo "Error: Virtual environment not found at $VENV_DIR"
-    echo "Run 'uv venv && source .venv/bin/activate && uv pip install -e .' first"
-    exit 1
+if [ -d "$VENV_DIR" ]; then
+    echo "Removing existing virtual environment to ensure it's clean..."
+    rm -rf "$VENV_DIR"
 fi
+
+echo "Creating virtual environment..."
+uv venv || { echo "Failed to create virtual environment"; exit 1; }
 
 # Activate venv and run server
 cd "$PROJECT_DIR"
-source "$VENV_DIR/bin/activate"
+source "$VENV_DIR/bin/activate" || { echo "Failed to activate virtual environment"; exit 1; }
 export ENV_FILE=.env
 
 echo "Reinstalling package with latest changes..."

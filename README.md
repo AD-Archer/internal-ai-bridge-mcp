@@ -15,7 +15,7 @@ An internal AI is an AI use internally by an organization, school or business. T
 - stdio and WebSocket transports; OpenAI-compatible `/v1/chat/completions` endpoint.
 - Conversation transcripts persisted in SQLite; `/memory/recall` to fetch context blocks per session.
 - Resources for discovery (`external-ai://webhooks`, `external-ai://messages`, `memory://sessions`, `memory://health`).
-- Automatic retry on 5xx/timeouts (up to 3 attempts) and lightweight OpenAPI at `/mcp/openapi.json`.
+- Automatic retry on 5xx/timeouts (up to 3 attempts) and comprehensive OpenAPI documentation at `/docs` (Swagger UI) and `/mcp/openapi.json`.
 
 ## Notice
 - This bridge has to be hosted remotely or have ports 80/443 forwarded, or else you will not be able to receive messages back from your AI service. It is recommended to install tailscale and use tailscale serve, other solutions exist and are untested such as cloudflare tunnels.
@@ -72,6 +72,7 @@ docker compose -f docker-compose.example.yml up -d
 # or copy the example to docker-compose.yml first, then:
 # docker compose up -d
 ```
+- Access the Swagger UI API documentation at `http://localhost:8765/docs`.
 
 Run with plain Docker:
 ```bash
@@ -80,6 +81,7 @@ docker run --rm -p 8765:8765 \
   -v "$(pwd)/data:/app/data" \
   ghcr.io/ad-archer/external-ai-bridge-mcp:latest
 ```
+- Access the Swagger UI API documentation at `http://localhost:8765/docs`.
 - Container loads `/app/.env` by default (`ENV_FILE` can override).
 - Default port is `8765`; override with `-e PORT=9000`.
  - Ensure `CONVERSATION_DB_PATH=/app/data/conversation_history.db` in your `.env` (default is set in the image) so the DB lands in the mounted volume.
@@ -93,6 +95,8 @@ cp .env.example .env
 # edit .env, then:
 external-ai websocket --env-file .env --host 0.0.0.0 --port 8765
 ```
+- Access the Swagger UI API documentation at `http://localhost:8765/docs`.
+
 Uvicorn entrypoint: `ENV_FILE=.env uvicorn external-ai_mcp.asgi:app --host 0.0.0.0 --port 8765 --reload`.
 
 ## Configuration reference
